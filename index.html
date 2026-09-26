@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Valorant Weapon Roulette</title>
+<style>
+  :root{
+    --bg:#0f1923; --card:#1a232e; --card2:#232f3b;
+    --accent:#ff4655; --text:#ece8e1; --muted:#8b978f;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:"Segoe UI",system-ui,Arial,sans-serif;
+    min-height:100vh;
+  }
+  header{ text-align:center; padding:28px 16px 8px; }
+  h1{
+    margin:0; font-size:2.2rem; letter-spacing:4px; text-transform:uppercase;
+    font-weight:900;
+  }
+  h1 span{ color:var(--accent); }
+  header p{ margin:8px 0 0; color:var(--muted); }
+  .toolbar{ text-align:center; padding:12px 16px 4px; }
+  button{
+    background:var(--accent); color:#fff; border:none; border-radius:6px;
+    padding:12px 28px; font-size:1rem; font-weight:700; letter-spacing:1px;
+    text-transform:uppercase; cursor:pointer; transition:transform .1s, filter .15s;
+  }
+  button:hover{ filter:brightness(1.12); }
+  button:active{ transform:scale(.97); }
+  .grid{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+    gap:24px; padding:24px; max-width:1350px; margin:0 auto;
+  }
+  .card{
+    background:linear-gradient(160deg,var(--card2),var(--card));
+    border:1px solid #2c3944; border-radius:14px; padding:18px 14px 16px;
+    text-align:center; box-shadow:0 8px 24px rgba(0,0,0,.35);
+  }
+  .card h2{
+    margin:0 0 12px; font-size:1.05rem; letter-spacing:2px; text-transform:uppercase;
+    color:var(--text);
+  }
+  .card.all{ grid-column:1 / -1; }
+  .section{
+    text-align:center; margin:32px 16px 0; font-size:1.6rem; letter-spacing:4px;
+    text-transform:uppercase; font-weight:900;
+    border-top:1px solid #2c3944; padding-top:28px; max-width:1300px;
+  }
+  @media (min-width:1332px){ .section{ margin-left:auto; margin-right:auto; } }
+  .section span{ color:var(--accent); }
+  .card .sub{ color:var(--muted); font-size:.85rem; margin:-6px 0 12px; letter-spacing:1px; }
+  .wheel-wrap{ position:relative; width:250px; margin:0 auto; }
+  .card.all .wheel-wrap{ width:380px; max-width:100%; }
+  .wheel-wrap::before{
+    content:""; position:absolute; top:-8px; left:50%; transform:translateX(-50%);
+    border-left:14px solid transparent; border-right:14px solid transparent;
+    border-top:26px solid var(--accent); z-index:2;
+    filter:drop-shadow(0 2px 3px rgba(0,0,0,.6));
+  }
+  canvas{
+    display:block; width:100%; height:auto; border-radius:50%; cursor:pointer;
+    box-shadow:0 0 0 5px #2c3944, 0 0 0 7px var(--accent), 0 10px 25px rgba(0,0,0,.5);
+    transition:box-shadow .2s;
+  }
+  canvas.spinning{ cursor:wait; box-shadow:0 0 0 5px #2c3944, 0 0 0 7px #fff, 0 0 30px rgba(255,70,85,.6); }
+  .hint{ color:var(--muted); font-size:.8rem; margin-top:12px; }
+  .result{
+    min-height:1.8em; margin-top:8px; font-size:1.45rem; font-weight:900;
+    color:var(--accent); letter-spacing:2px; text-transform:uppercase;
+  }
+  .result.pop{ animation:pop .4s ease; }
+  @keyframes pop{ 0%{transform:scale(.6);opacity:0} 70%{transform:scale(1.15)} 100%{transform:scale(1);opacity:1} }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Weapon <span>Roulette</span></h1>
+  <p>Click any wheel to spin it and let it decide for you</p>
+</header>
+<div class="toolbar">
+  <button id="spinAll">Spin all</button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<h2 class="section">By <span>credits</span></h2>
+<div class="grid" id="creditsGrid"></div>
+
+<script>
+const CLASSES = [
+  { name: "Sidearms (Pistols)", weapons: ["Classic","Shorty","Frenzy","Ghost","Sheriff","Bandit"] },
+  { name: "SMGs",               weapons: ["Stinger","Spectre"] },
+  { name: "Shotguns",           weapons: ["Bucky","Judge"] },
+  { name: "Rifles",             weapons: ["Bulldog","Guardian","Phantom","Vandal","Warden"] },
+  { name: "Snipers",            weapons: ["Marshal","Outlaw","Operator"] },
+  { name: "Heavies (LMGs)",     weapons: ["Ares","Odin"] },
+];
+
+// Wheels based on the round's economy
+const CREDITS = [
+  { name: "Pistols", sub: "Pistol round",  weapons: ["Classic","Shorty","Frenzy","Ghost","Sheriff","Bandit"] },
+  { name: "Mid",     sub: "Round lost",    weapons: ["Stinger","Marshal","Bucky","Sheriff"] },
+  { name: "Mid",     sub: "Round won",     weapons: ["Spectre","Ares","Outlaw","Bulldog","Guardian","Judge"] },
+  { name: "High",    sub: "Full buy",      weapons: ["Odin","Vandal","Phantom","Warden"], weights: [20, 30, 30, 20] },
+];
+
+const PALETTE = ["#ff4655","#2b3a4a","#7a2a35","#1e4a6e","#3d6f7e","#8a5a3a","#4b3f7a"];
+
+class Wheel {
+  constructor(canvas, weapons, resultEl, weights){
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.weapons = weapons;
+    // weights = relative odds per weapon (all equal by default)
+    this.weights = weights || weapons.map(() => 1);
+    const totalWeight = this.weights.reduce((a,b) => a+b, 0);
+    this.sizes = this.weights.map(w => (w/totalWeight) * 2*Math.PI);   // angle of each slice
+    this.starts = [];
+    let acc = 0;
+    this.sizes.forEach(s => { this.starts.push(acc); acc += s; });
+    this.resultEl = resultEl;
+    this.angle = 0;           // current rotation (radians)
+    this.spinning = false;
+    this.winner = -1;
+    canvas.addEventListener("click", () => this.spin());
+    this.draw();
+  }
+
+  draw(){
+    const ctx = this.ctx, W = this.canvas.width, r = W/2, cx = r, cy = r;
+    const n = this.weapons.length;
+    ctx.clearRect(0,0,W,W);
+
+    for(let i=0;i<n;i++){
+      const size = this.sizes[i];
+      const start = this.angle + this.starts[i], end = start + size;
+      ctx.beginPath();
+      ctx.moveTo(cx,cy);
+      ctx.arc(cx,cy,r,start,end);
+      ctx.closePath();
+      ctx.fillStyle = PALETTE[i % PALETTE.length];
+      ctx.fill();
+      ctx.strokeStyle = "#0f1923";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // highlight the winning slice
+      if(i === this.winner && !this.spinning){
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(cx,cy);
+        ctx.arc(cx,cy,r,start,end);
+        ctx.closePath();
+        ctx.fillStyle = "rgba(255,255,255,.22)";
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // label
+      ctx.save();
+      ctx.translate(cx,cy);
+      ctx.rotate(start + size/2);
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      const fs = n <= 4 ? 22 : n <= 8 ? 18 : 14;
+      ctx.font = "700 " + fs + "px 'Segoe UI',system-ui,Arial,sans-serif";
+      ctx.fillStyle = "#ece8e1";
+      ctx.shadowColor = "rgba(0,0,0,.7)";
+      ctx.shadowBlur = 4;
+      ctx.fillText(this.weapons[i].toUpperCase(), r-16, 0);
+      ctx.restore();
+    }
+
+    // hub
+    ctx.beginPath();
+    ctx.arc(cx,cy,r*0.12,0,2*Math.PI);
+    ctx.fillStyle = "#0f1923";
+    ctx.fill();
+    ctx.strokeStyle = "#ff4655";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+  }
+
+  spin(){
+    if(this.spinning) return;
+    this.spinning = true;
+    this.winner = -1;
+    this.canvas.classList.add("spinning");
+    this.resultEl.textContent = "";
+    this.resultEl.classList.remove("pop");
+
+    // weighted pick
+    const totalWeight = this.weights.reduce((a,b) => a+b, 0);
+    let roll = Math.random()*totalWeight, picked = 0;
+    for(let i=0;i<this.weights.length;i++){
+      roll -= this.weights[i];
+      if(roll < 0){ picked = i; break; }
+    }
+    // target angle: the picked slice must land under the pointer (top = -PI/2)
+    const inside = (0.15 + Math.random()*0.7) * this.sizes[picked];
+    let target = (-Math.PI/2 - (this.starts[picked] + inside)) % (2*Math.PI);
+    if(target < 0) target += 2*Math.PI;
+
+    const currentNorm = ((this.angle % (2*Math.PI)) + 2*Math.PI) % (2*Math.PI);
+    let delta = target - currentNorm;
+    if(delta < 0) delta += 2*Math.PI;
+    const turns = 5 + Math.floor(Math.random()*4);
+    const total = turns*2*Math.PI + delta;
+
+    const from = this.angle;
+    const duration = 4000 + Math.random()*1500;
+    const t0 = performance.now();
+    const ease = t => 1 - Math.pow(1-t, 4);
+
+    const step = (now) => {
+      const t = Math.min((now - t0)/duration, 1);
+      this.angle = from + total*ease(t);
+      this.draw();
+      if(t < 1){
+        requestAnimationFrame(step);
+      } else {
+        this.spinning = false;
+        this.winner = picked;
+        this.canvas.classList.remove("spinning");
+        this.draw();
+        this.resultEl.textContent = this.weapons[picked];
+        this.resultEl.classList.add("pop");
+      }
+    };
+    requestAnimationFrame(step);
+  }
+}
+
+const grid = document.getElementById("grid");
+const creditsGrid = document.getElementById("creditsGrid");
+const wheels = [];
+
+function createCard(container, name, weapons, size, extraClass, sub, weights){
+  const card = document.createElement("div");
+  card.className = "card" + (extraClass ? " " + extraClass : "");
+  card.innerHTML =
+    '<h2>' + name + '</h2>' +
+    (sub ? '<div class="sub">' + sub + '</div>' : '') +
+    '<div class="wheel-wrap"><canvas width="' + size + '" height="' + size + '"></canvas></div>' +
+    '<div class="result"></div>' +
+    '<div class="hint">' + weapons.length + ' weapons · click to spin</div>';
+  container.appendChild(card);
+  wheels.push(new Wheel(card.querySelector("canvas"), weapons, card.querySelector(".result"), weights));
+}
+
+CLASSES.forEach(c => createCard(grid, c.name, c.weapons, 400));
+
+// Extra wheel holding every weapon
+const allWeapons = CLASSES.flatMap(c => c.weapons);
+createCard(grid, "All weapons", allWeapons, 600, "all");
+
+CREDITS.forEach(c => createCard(creditsGrid, c.name, c.weapons, 400, "", c.sub, c.weights));
+
+document.getElementById("spinAll").addEventListener("click", () => {
+  wheels.forEach((w, i) => setTimeout(() => w.spin(), i*120));
+});
+</script>
+</body>
+</html>
