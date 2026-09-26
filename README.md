@@ -3,7 +3,7 @@
 An interactive spinning wheel that decides which weapon you play in Valorant.
 One HTML file, no dependencies, no install — just open it in a browser.
 
-**[Live demo](https://USERNAME.github.io/valorant-weapon-roulette/)**
+**[Live demo](https://EnriqueFelixR.github.io/valorant-weapon-roulette/)**
 
 ## Usage
 
